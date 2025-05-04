@@ -1,0 +1,96 @@
+library(quantmod)
+library(tseries)
+library(forecast)
+library(ggplot2)
+library(readr)
+library(rugarch)
+library(PerformanceAnalytics)
+
+####
+
+
+file_path <- "~/Desktop/GDPC1.csv"
+gdp_data  <- read_csv(file_path, show_col_types = FALSE)
+colnames(gdp_data)[colnames(gdp_data) == "GDPC1"] <- "gdp"
+gdp_data$observation_date <- as.Date(gdp_data$observation_date)
+
+gdp_ts <- ts(gdp_data$gdp, start = c(1947, 1), frequency = 4)
+
+plot(gdp_ts, main="US Real GDP (GDPC1)", ylab="Mrd. USD", xlab="Jahr")
+
+adf_orig <- adf.test(gdp_ts)
+print(adf_orig)
+
+gdp_diff <- diff(gdp_ts)
+gdp_diff <- na.omit(gdp_diff)
+
+adf_diff <- adf.test(gdp_diff)
+print(adf_diff)
+
+par(mfrow = c(1,2))
+acf(gdp_diff, main="ACF – differenzierte GDP-Serie")
+pacf(gdp_diff, main="PACF – differenzierte GDP-Serie")
+
+arma_gdp <- arima(gdp_diff, order = c(1, 0, 1))
+summary(arma_gdp)
+
+# Grafik der Residuen und ihrer ACF/PACF
+tsdisplay(residuals(arma_gdp), main="Residuen ARMA(1,1) – US GDP")
+
+lb_gdp <- Box.test(residuals(arma_gdp), lag = 12, type = "Ljung-Box")
+
+qqnorm(residuals(arma_gdp)); qqline(residuals(arma_gdp))
+
+forecast_arma <- forecast(arma_gdp, h = 30)
+plot(forecast_arma, main = "30-day forecast for USA GDP")
+
+
+####
+
+getSymbols("AAPL", src="yahoo", from="2020-01-01", to=Sys.Date())
+aapl_close <- Cl(AAPL)
+plot(aapl_close, main="AAPL Close Price", ylab="USD")
+
+adf_raw <- adf.test(aapl_close)
+print(adf_raw)
+
+auto_mod <- auto.arima(aapl_close)
+summary(auto_mod)
+
+tsdisplay(residuals(auto_mod), main="Residuen ARIMA(0, 1, 0)")
+Box.test(residuals(auto_mod), lag=20, type="Ljung-Box")
+qqnorm(residuals(auto_mod)); qqline(residuals(auto_mod))
+
+forecast_arima <- forecast(auto_mod, h = 30)
+plot(forecast_arima, main = "30-day forecast for apple stock")
+
+###
+
+getSymbols("TSLA", src = "yahoo", from = "2020-01-01", to = Sys.Date())
+tsla_close <- Cl(TSLA)
+
+tsla_returns <- dailyReturn(tsla_close, type = "log")
+tsla_returns <- na.omit(tsla_returns)
+
+plot(tsla_returns, main = "daily log-return for TSLA", ylab= "log-return")
+
+garch_spec <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+  mean.model = list(armaOrder = c(0,0), include.mean = FALSE),
+  distribution.model = "norm"
+)
+
+garch_fit <- ugarchfit(spec = garch_spec, data = tsla_returns)
+show(garch_fit)
+
+volatility <- sigma(garch_fit)
+plot(volatility, main = "Estimated volatility TSLA (GARCH(1,1))", ylab = "volatility")
+
+par(mfrow = c(2,1))
+plot(tsla_returns, main = "daily log-return for TSLA", ylab= "log-return")
+plot(volatility, main = "Estimated volatility TSLA (GARCH(1,1))", ylab = "volatility")
+par(mfrow = c(1,1))
+
+garch_forecast <- ugarchforecast(garch_fit, n.ahead = 10)
+plot(garch_forecast, which = 1)  # volatility
+
